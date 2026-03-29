@@ -66,6 +66,21 @@ function mapClashProxy(p: ClashProxy): Proxy | null {
       case 'hysteria2':
         mapHysteria2(proxy, p)
         break
+      case 'snell':
+        mapSnell(proxy, p)
+        break
+      case 'hysteria':
+        mapHysteria(proxy, p)
+        break
+      case 'wireguard':
+        mapWireGuard(proxy, p)
+        break
+      case 'http':
+        mapHTTP(proxy, p)
+        break
+      case 'socks5':
+        mapSOCKS5(proxy, p)
+        break
     }
 
     // Common fields
@@ -89,6 +104,8 @@ function mapType(t: string): ProxyType | null {
     'trojan': 'trojan',
     'hysteria2': 'hysteria2',
     'hy2': 'hysteria2',
+    'snell': 'snell',
+    'hysteria': 'hysteria',
     'wireguard': 'wireguard',
     'http': 'http',
     'socks5': 'socks5',
@@ -156,6 +173,61 @@ function mapHysteria2(proxy: Proxy, p: ClashProxy): void {
   if (p.up) proxy.up = str(p.up)
   if (p.down) proxy.down = str(p.down)
   mapTLS(proxy, p)
+}
+
+function mapSnell(proxy: Proxy, p: ClashProxy): void {
+  proxy.psk = str(p.psk)
+  if (p.version) proxy.snellVersion = num(p.version)
+  const obfsOpts = p['obfs-opts'] as Record<string, unknown> | undefined
+  if (obfsOpts) {
+    if (obfsOpts.mode) proxy.obfsMode = str(obfsOpts.mode)
+    if (obfsOpts.host) proxy.obfsHost = str(obfsOpts.host)
+  }
+}
+
+function mapHysteria(proxy: Proxy, p: ClashProxy): void {
+  if (p.ports) proxy.up = str(p.ports) // store ports in a field we can use
+  if (p.protocol) proxy.hysteriaProtocol = str(p.protocol)
+  if (p['obfs-protocol']) proxy.obfsType = str(p['obfs-protocol'])
+  if (p.up) proxy.up = str(p.up)
+  if (p['up-speed']) proxy.upSpeed = num(p['up-speed'])
+  if (p.down) proxy.down = str(p.down)
+  if (p['down-speed']) proxy.downSpeed = num(p['down-speed'])
+  if (p['auth-str']) proxy.authStr = str(p['auth-str'])
+  if (p.obfs) proxy.obfsPassword = str(p.obfs)
+  if (p['recv-window-conn']) proxy.recvWindowConn = num(p['recv-window-conn'])
+  if (p['recv-window']) proxy.recvWindow = num(p['recv-window'])
+  if (p['hop-interval']) proxy.hopInterval = num(p['hop-interval'])
+  mapTLS(proxy, p)
+}
+
+function mapWireGuard(proxy: Proxy, p: ClashProxy): void {
+  proxy.privateKey = str(p['private-key'])
+  proxy.peerPublicKey = str(p['public-key'])
+  if (p['preshared-key']) proxy.preSharedKey = str(p['preshared-key'])
+  if (p.ip) proxy.ip = str(p.ip)
+  if (p.ipv6) proxy.ipv6 = str(p.ipv6)
+  if (p.mtu) proxy.mtu = num(p.mtu)
+  if (p.dns) proxy.dns = p.dns as string[]
+  if (p.reserved) proxy.reserved = p.reserved as number[]
+}
+
+function mapHTTP(proxy: Proxy, p: ClashProxy): void {
+  if (p.username) proxy.username = str(p.username)
+  if (p.password) proxy.password = str(p.password)
+  if (p.tls) {
+    proxy.tls = true
+    if (p.sni) proxy.sni = str(p.sni)
+  }
+}
+
+function mapSOCKS5(proxy: Proxy, p: ClashProxy): void {
+  if (p.username) proxy.username = str(p.username)
+  if (p.password) proxy.password = str(p.password)
+  if (p.tls) {
+    proxy.tls = true
+    if (p.sni) proxy.sni = str(p.sni)
+  }
 }
 
 function mapTransport(proxy: Proxy, p: ClashProxy): void {

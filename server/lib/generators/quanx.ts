@@ -66,7 +66,46 @@ function proxyToQuanXLine(proxy: Proxy): string | null {
       return parts.join(', ')
     }
 
-    // vless, ssr, hysteria2 not supported in Quantumult X natively
+    case 'ssr': {
+      const parts = [
+        `shadowsocks=${proxy.server}:${proxy.port}`,
+        `method=${proxy.method}`,
+        `password=${proxy.password}`,
+        `ssr-protocol=${proxy.protocol || 'origin'}`,
+      ]
+      if (proxy.protocolParam) parts.push(`ssr-protocol-param=${proxy.protocolParam}`)
+      parts.push(`obfs=${proxy.obfs || 'plain'}`)
+      if (proxy.obfsParam) parts.push(`obfs-host=${proxy.obfsParam}`)
+      parts.push('fast-open=false', 'udp-relay=true', `tag=${proxy.name}`)
+      return parts.join(', ')
+    }
+
+    case 'http': {
+      const parts = [
+        `http=${proxy.server}:${proxy.port}`,
+        `username=${proxy.username || 'none'}`,
+        `password=${proxy.password || 'none'}`,
+        `over-tls=${proxy.tls ? 'true' : 'false'}`,
+      ]
+      if (proxy.tls && proxy.sni) parts.push(`tls-host=${proxy.sni}`)
+      parts.push(`tag=${proxy.name}`)
+      return parts.join(', ')
+    }
+
+    case 'socks5': {
+      const parts = [
+        `socks5=${proxy.server}:${proxy.port}`,
+      ]
+      if (proxy.username && proxy.password) {
+        parts.push(`username=${proxy.username}`, `password=${proxy.password}`)
+      }
+      parts.push(`over-tls=${proxy.tls ? 'true' : 'false'}`)
+      if (proxy.tls && proxy.sni) parts.push(`tls-host=${proxy.sni}`)
+      parts.push(`tag=${proxy.name}`)
+      return parts.join(', ')
+    }
+
+    // vless, hysteria2 not supported in Quantumult X natively
     default:
       return null
   }
@@ -104,16 +143,21 @@ server=8.8.8.8`)
   if (hasExternal) {
     policyLines = options!.externalGroups!.map((g) => {
       const members = g.proxies.join(', ')
-      if (g.type === 'url-test') {
-        const url = g.url || 'http://www.gstatic.com/generate_204'
+      // Smart and url-test both map to url-latency-benchmark in QuanX
+      if (g.type === 'url-test' || g.type === 'smart') {
         const interval = g.interval || 300
         const tolerance = g.tolerance || 0
         return `url-latency-benchmark=${g.name}, ${members}, server-tag-regex=.*, check-interval=${interval}, tolerance=${tolerance}, alive-checking=false`
       }
       if (g.type === 'fallback') {
-        const url = g.url || 'http://www.gstatic.com/generate_204'
         return `available=${g.name}, ${members}, server-tag-regex=.*, check-interval=${g.interval || 300}`
       }
+      if (g.type === 'ssid') {
+        // SSID: ssid=Name, default=Policy, cellular=Policy, "SSID":Policy
+        const [defaultPolicy, ...rest] = g.proxies
+        return `ssid=${g.name}, default=${defaultPolicy}, ${rest.join(', ')}`
+      }
+      // load-balance, relay, select all map to static in QuanX
       return `static=${g.name}, ${members}`
     })
   }

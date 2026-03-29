@@ -126,6 +126,61 @@ function proxyToLoonLine(proxy: Proxy): string | null {
       return parts.join(',')
     }
 
+    case 'wireguard': {
+      const parts = [
+        `${proxy.name} = wireguard`,
+        `interface-ip=${proxy.ip || ''}`,
+      ]
+      if (proxy.ipv6) parts.push(`interface-ipv6=${proxy.ipv6}`)
+      parts.push(`private-key=${proxy.privateKey || ''}`)
+      if (proxy.dns) {
+        for (const d of proxy.dns) {
+          if (d.includes(':')) parts.push(`dnsv6=${d}`)
+          else parts.push(`dns=${d}`)
+        }
+      }
+      if (proxy.mtu) parts.push(`mtu=${proxy.mtu}`)
+      // Peer info
+      const peerParts = [`public-key=${proxy.peerPublicKey || ''}`, `endpoint=${proxy.server}:${proxy.port}`, 'allowed-ips=0.0.0.0/0\\, ::/0']
+      if (proxy.preSharedKey) peerParts.push(`preshared-key=${proxy.preSharedKey}`)
+      if (proxy.reserved) peerParts.push(`reserved=${proxy.reserved.join(',')}`)
+      parts.push(`peers=[{${peerParts.join(',')}}]`)
+      return parts.join(',')
+    }
+
+    case 'http': {
+      const parts = [
+        `${proxy.name} = http`,
+        proxy.server,
+        String(proxy.port),
+        proxy.username || '',
+        `"${proxy.password || ''}"`,
+      ]
+      if (proxy.tls) {
+        parts.push('over-tls=true')
+        if (proxy.sni) parts.push(`tls-name=${proxy.sni}`)
+        if (proxy.skipCertVerify) parts.push('skip-cert-verify=true')
+      }
+      return parts.join(',')
+    }
+
+    case 'socks5': {
+      const parts = [
+        `${proxy.name} = socks5`,
+        proxy.server,
+        String(proxy.port),
+      ]
+      if (proxy.username && proxy.password) {
+        parts.push(proxy.username, `"${proxy.password}"`)
+      }
+      parts.push(`over-tls=${proxy.tls ? 'true' : 'false'}`)
+      if (proxy.tls) {
+        if (proxy.sni) parts.push(`tls-name=${proxy.sni}`)
+        if (proxy.skipCertVerify) parts.push('skip-cert-verify=true')
+      }
+      return parts.join(',')
+    }
+
     default:
       return null
   }
@@ -163,14 +218,29 @@ wifi-access-socks5-port = 7221`)
 
   if (hasExternal) {
     groupLines = options!.externalGroups!.map((g) => {
-      const type = g.type === 'url-test' ? 'url-test' : g.type === 'fallback' ? 'fallback' : g.type === 'load-balance' ? 'load-balance' : 'select'
+      // Smart maps to url-test in Loon
+      const loonType = g.type === 'smart' ? 'url-test' : g.type
       const members = g.proxies.join(',')
-      if (type === 'url-test' || type === 'fallback') {
+      if (loonType === 'url-test' || loonType === 'fallback') {
         const url = g.url || 'http://www.gstatic.com/generate_204'
         const interval = g.interval || 300
-        return `${g.name} = ${type},${members},url = ${url},interval = ${interval}`
+        let line = `${g.name} = ${loonType},${members},url = ${url},interval = ${interval}`
+        if (g.tolerance) line += `,tolerance = ${g.tolerance}`
+        if (g.timeout) line += `,timeout = ${g.timeout}`
+        return line
       }
-      return `${g.name} = ${type},${members}`
+      if (loonType === 'load-balance') {
+        let line = `${g.name} = load-balance,${members}`
+        if (g.url) line += `,url = ${g.url}`
+        if (g.interval) line += `,interval = ${g.interval}`
+        return line
+      }
+      if (loonType === 'ssid') {
+        // SSID: name = ssid, default = Policy, cellular = Policy, "SSID" = Policy
+        const [defaultPolicy, ...rest] = g.proxies
+        return `${g.name} = ssid,default = ${defaultPolicy},${rest.join(',')}`
+      }
+      return `${g.name} = select,${members}`
     })
   }
   else {

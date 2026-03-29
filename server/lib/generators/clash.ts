@@ -132,6 +132,84 @@ function mapProxyToClash(proxy: Proxy): Record<string, unknown> | null {
       return base
     }
 
+    case 'snell': {
+      // Skip snell v4+ (not supported in Clash)
+      if (proxy.snellVersion && proxy.snellVersion >= 4) return null
+      Object.assign(base, {
+        type: 'snell',
+        psk: proxy.psk,
+      })
+      if (proxy.snellVersion) base['version'] = proxy.snellVersion
+      if (proxy.obfsMode) {
+        const obfsOpts: Record<string, unknown> = { mode: proxy.obfsMode }
+        if (proxy.obfsHost) obfsOpts['host'] = proxy.obfsHost
+        base['obfs-opts'] = obfsOpts
+      }
+      return base
+    }
+
+    case 'hysteria': {
+      Object.assign(base, {
+        type: 'hysteria',
+      })
+      if (proxy.hysteriaProtocol) base['protocol'] = proxy.hysteriaProtocol
+      if (proxy.obfsType) base['obfs-protocol'] = proxy.obfsType
+      if (proxy.up) base['up'] = proxy.up
+      if (proxy.upSpeed) base['up-speed'] = proxy.upSpeed
+      if (proxy.down) base['down'] = proxy.down
+      if (proxy.downSpeed) base['down-speed'] = proxy.downSpeed
+      if (proxy.authStr) base['auth-str'] = proxy.authStr
+      if (proxy.obfsPassword) base['obfs'] = proxy.obfsPassword
+      if (proxy.sni) base['sni'] = proxy.sni
+      if (proxy.skipCertVerify != null) base['skip-cert-verify'] = proxy.skipCertVerify
+      if (proxy.fingerprint) base['fingerprint'] = proxy.fingerprint
+      if (proxy.alpn) base['alpn'] = proxy.alpn
+      if (proxy.recvWindowConn) base['recv-window-conn'] = proxy.recvWindowConn
+      if (proxy.recvWindow) base['recv-window'] = proxy.recvWindow
+      if (proxy.hopInterval) base['hop-interval'] = proxy.hopInterval
+      if (proxy.tfo != null) base['fast-open'] = proxy.tfo
+      return base
+    }
+
+    case 'wireguard': {
+      Object.assign(base, {
+        type: 'wireguard',
+        'private-key': proxy.privateKey,
+        'public-key': proxy.peerPublicKey,
+        ip: proxy.ip,
+        udp: proxy.udp ?? true,
+      })
+      if (proxy.ipv6) base['ipv6'] = proxy.ipv6
+      if (proxy.preSharedKey) base['preshared-key'] = proxy.preSharedKey
+      if (proxy.dns) base['dns'] = proxy.dns
+      if (proxy.mtu) base['mtu'] = proxy.mtu
+      if (proxy.reserved) base['reserved'] = proxy.reserved
+      return base
+    }
+
+    case 'http': {
+      Object.assign(base, {
+        type: 'http',
+        tls: proxy.tls ?? false,
+      })
+      if (proxy.username) base['username'] = proxy.username
+      if (proxy.password) base['password'] = proxy.password
+      if (proxy.sni) base['sni'] = proxy.sni
+      if (proxy.skipCertVerify != null) base['skip-cert-verify'] = proxy.skipCertVerify
+      return base
+    }
+
+    case 'socks5': {
+      Object.assign(base, {
+        type: 'socks5',
+      })
+      if (proxy.username) base['username'] = proxy.username
+      if (proxy.password) base['password'] = proxy.password
+      if (proxy.tls) base['tls'] = true
+      if (proxy.skipCertVerify != null) base['skip-cert-verify'] = proxy.skipCertVerify
+      return base
+    }
+
     default:
       return null
   }
@@ -152,20 +230,26 @@ export function generateClash(proxies: Proxy[], options?: ExternalGenerateOption
 
   if (hasExternal) {
     proxyGroups = options!.externalGroups!.map((g) => {
+      // Smart maps to url-test in Clash
+      const clashType = g.type === 'smart' ? 'url-test' : g.type
       const group: Record<string, unknown> = {
         name: g.name,
-        type: g.type,
+        type: clashType,
         proxies: g.proxies,
       }
-      if (g.type === 'url-test' || g.type === 'fallback') {
+      if (clashType === 'url-test' || clashType === 'fallback' || clashType === 'load-balance') {
         group['url'] = g.url || 'http://www.gstatic.com/generate_204'
         group['interval'] = g.interval || 300
+        if (g.tolerance) group['tolerance'] = g.tolerance
+        if (g.lazy != null) group['lazy'] = g.lazy
       }
-      else {
+      else if (clashType !== 'relay' && clashType !== 'ssid') {
         if (g.url) group['url'] = g.url
         if (g.interval) group['interval'] = g.interval
       }
-      if (g.tolerance) group['tolerance'] = g.tolerance
+      if (g.disableUdp) group['disable-udp'] = true
+      if (g.strategy) group['strategy'] = g.strategy
+      if (g.timeout) group['timeout'] = g.timeout
       return group
     })
     // Filter out rule types not supported by Clash

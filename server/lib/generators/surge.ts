@@ -71,7 +71,47 @@ function proxyToSurgeLine(proxy: Proxy): string | null {
       return parts.join(', ')
     }
 
-    // ssr, vless, wireguard etc. not natively supported in Surge
+    case 'snell': {
+      const parts = [
+        `${proxy.name} = snell`,
+        proxy.server,
+        String(proxy.port),
+        `psk=${proxy.psk}`,
+      ]
+      if (proxy.obfsMode) {
+        parts.push(`obfs=${proxy.obfsMode}`)
+        if (proxy.obfsHost) parts.push(`obfs-host=${proxy.obfsHost}`)
+      }
+      if (proxy.snellVersion) parts.push(`version=${proxy.snellVersion}`)
+      return parts.join(', ')
+    }
+
+    case 'http': {
+      const parts = [
+        `${proxy.name} = http`,
+        proxy.server,
+        String(proxy.port),
+      ]
+      if (proxy.username) parts.push(`username=${proxy.username}`)
+      if (proxy.password) parts.push(`password=${proxy.password}`)
+      parts.push(`tls=${proxy.tls ? 'true' : 'false'}`)
+      if (proxy.skipCertVerify) parts.push('skip-cert-verify=true')
+      return parts.join(', ')
+    }
+
+    case 'socks5': {
+      const parts = [
+        `${proxy.name} = socks5`,
+        proxy.server,
+        String(proxy.port),
+      ]
+      if (proxy.username) parts.push(`username=${proxy.username}`)
+      if (proxy.password) parts.push(`password=${proxy.password}`)
+      if (proxy.skipCertVerify) parts.push('skip-cert-verify=true')
+      return parts.join(', ')
+    }
+
+    // ssr, vless, wireguard not natively supported in Surge text format
     default:
       return null
   }
@@ -111,13 +151,25 @@ ${proxyLines.join('\n')}`)
   if (hasExternal) {
     groupLines = options!.externalGroups!.map((g) => {
       const members = g.proxies.join(', ')
-      if (g.type === 'url-test' || g.type === 'fallback') {
+      // Smart maps to url-test in Surge
+      const surgeType = g.type === 'smart' ? 'url-test' : g.type
+      if (surgeType === 'url-test' || surgeType === 'fallback') {
         const url = g.url || 'http://www.gstatic.com/generate_204'
         const interval = g.interval || 300
-        return `${g.name} = ${g.type}, ${members}, url=${url}, interval=${interval}`
+        let line = `${g.name} = ${surgeType}, ${members}, url=${url}, interval=${interval}`
+        if (g.tolerance) line += `, tolerance=${g.tolerance}`
+        if (g.timeout) line += `, timeout=${g.timeout}`
+        return line
       }
-      if (g.type === 'load-balance') {
-        return `${g.name} = load-balance, ${members}`
+      if (surgeType === 'load-balance') {
+        let line = `${g.name} = load-balance, ${members}`
+        if (g.strategy) line += `, persistent=${g.strategy === 'consistent-hashing'}`
+        return line
+      }
+      if (surgeType === 'ssid') {
+        // SSID format: name = ssid, default=Policy1, "SSID1":Policy2, ...
+        const [defaultPolicy, ...ssidEntries] = g.proxies
+        return `${g.name} = ssid, default=${defaultPolicy}, ${ssidEntries.join(', ')}`
       }
       return `${g.name} = select, ${members}`
     })

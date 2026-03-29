@@ -5,6 +5,7 @@ import { generateLoon } from './loon'
 import { generateQuanX } from './quanx'
 import { generateSingBox } from './singbox'
 import { generateSurge } from './surge'
+import { generateMellow } from './mellow'
 import { generateV2ray, proxyToUri } from './v2ray'
 
 export type { ExternalGenerateOptions }
@@ -46,6 +47,9 @@ export function generateConfig(
 
     case 'singbox':
       return generateSingBox(proxies, ext)
+
+    case 'mellow':
+      return generateMellow(proxies, ext)
 
     case 'v2ray':
     case 'mixed':

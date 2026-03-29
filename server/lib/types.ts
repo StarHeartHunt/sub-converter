@@ -6,6 +6,7 @@ export interface Proxy {
   port: number
 
   // Auth
+  username?: string // HTTP, SOCKS5
   password?: string
   uuid?: string
   method?: string // encryption method
@@ -41,11 +42,24 @@ export interface Proxy {
   shortId?: string // reality
   realityOpts?: { publicKey?: string; shortId?: string }
 
-  // Hysteria2
+  // Snell
+  psk?: string
+  snellVersion?: number
+  obfsMode?: string // http, tls
+  obfsHost?: string
+
+  // Hysteria v1 / v2
   obfsType?: string // salamander
   obfsPassword?: string
   up?: string
   down?: string
+  upSpeed?: number
+  downSpeed?: number
+  authStr?: string
+  hysteriaProtocol?: string
+  recvWindowConn?: number
+  recvWindow?: number
+  hopInterval?: number
 
   // WireGuard
   privateKey?: string
@@ -55,6 +69,7 @@ export interface Proxy {
   ipv6?: string
   mtu?: number
   reserved?: number[]
+  dns?: string[]
 
   // Flags
   udp?: boolean
@@ -69,7 +84,9 @@ export type ProxyType =
   | 'vmess'
   | 'vless'
   | 'trojan'
+  | 'hysteria'
   | 'hysteria2'
+  | 'snell'
   | 'wireguard'
   | 'http'
   | 'socks5'
@@ -83,6 +100,7 @@ export type TargetType =
   | 'loon'
   | 'surfboard'
   | 'singbox'
+  | 'mellow'
   | 'v2ray'
   | 'ss'
   | 'ssr'
@@ -94,6 +112,8 @@ export interface SubConfig {
   url: string // pipe-separated URLs
   config?: string // remote config URL
   emoji?: boolean
+  addEmoji?: boolean // independent add emoji control
+  removeEmoji?: boolean // independent remove emoji control
   list?: boolean
   include?: string // regex
   exclude?: string // regex
@@ -105,4 +125,9 @@ export interface SubConfig {
   appendType?: boolean
   filename?: string
   ver?: number // surge version
+  filterScript?: string // JS filter expression
+  sortScript?: string // JS sort expression
+  managedConfig?: boolean // whether to output #!MANAGED-CONFIG header
+  interval?: number // managed config update interval
+  strict?: boolean // managed config strict mode
 }

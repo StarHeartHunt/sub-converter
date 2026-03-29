@@ -13,12 +13,17 @@ export interface RulesetEntry {
 
 export interface ProxyGroupTemplate {
   name: string
-  type: 'select' | 'url-test' | 'fallback' | 'load-balance'
+  type: 'select' | 'url-test' | 'fallback' | 'load-balance' | 'relay' | 'ssid' | 'smart'
   /** Mix of `[]GroupName`, `[]DIRECT`, `[]REJECT`, and regex patterns like `.*` */
   members: string[]
   testUrl?: string
   interval?: number
   tolerance?: number
+  timeout?: number
+  lazy?: boolean
+  disableUdp?: boolean
+  strategy?: 'consistent-hashing' | 'round-robin'
+  providers?: string[]
 }
 
 export interface ExternalConfig {
@@ -58,7 +63,7 @@ export function parseExternalConfig(content: string): ExternalConfig {
       }
     }
 
-    // custom_proxy_group=Name`type`member1`member2`...
+    // custom_proxy_group=Name`type`member1`member2`...`url`interval,timeout,tolerance
     if (line.startsWith('custom_proxy_group=')) {
       const value = line.slice('custom_proxy_group='.length)
       const parts = value.split('`')
@@ -66,34 +71,81 @@ export function parseExternalConfig(content: string): ExternalConfig {
         const name = parts[0]
         const type = parts[1] as ProxyGroupTemplate['type']
         const members: string[] = []
+        const providers: string[] = []
         let testUrl: string | undefined
         let interval: number | undefined
         let tolerance: number | undefined
+        let timeout: number | undefined
 
-        for (let i = 2; i < parts.length; i++) {
-          const part = parts[i].trim()
-          if (!part) continue
-          if (part.startsWith('http://') || part.startsWith('https://')) {
-            testUrl = part
+        // For url-test, fallback, load-balance: last two parts are url and timing
+        const needsUrlTest = type === 'url-test' || type === 'fallback' || type === 'load-balance' || type === 'smart'
+        let upperBound = parts.length
+
+        if (needsUrlTest && parts.length >= 5) {
+          // Last part: interval or interval,timeout,tolerance
+          const lastPart = parts[parts.length - 1]!.trim()
+          const secondLast = parts[parts.length - 2]!.trim()
+          if (secondLast.startsWith('http://') || secondLast.startsWith('https://')) {
+            testUrl = secondLast
+            upperBound -= 2
+            // Parse timing: "300" or "300,5,100"
+            const timeParts = lastPart.split(',').map(s => Number.parseInt(s.trim()))
+            if (timeParts[0]) interval = timeParts[0]
+            if (timeParts[1]) timeout = timeParts[1]
+            if (timeParts[2]) tolerance = timeParts[2]
           }
-          else if (/^\d+$/.test(part)) {
-            if (!interval) interval = Number(part)
-            else tolerance = Number(part)
+        }
+
+        for (let i = 2; i < upperBound; i++) {
+          const part = parts[i]!.trim()
+          if (!part) continue
+          if (part.startsWith('!!PROVIDER=')) {
+            providers.push(...part.slice(11).split(',').map(s => s.trim()).filter(Boolean))
           }
           else {
             members.push(part)
           }
         }
 
-        config.proxyGroups.push({ name, type, members, testUrl, interval, tolerance })
+        // Fallback: if url wasn't extracted by the structured approach, scan for it
+        if (!testUrl && needsUrlTest) {
+          for (let i = 2; i < parts.length; i++) {
+            const part = parts[i]!.trim()
+            if (part.startsWith('http://') || part.startsWith('https://')) {
+              testUrl = part
+              const idx = members.indexOf(part)
+              if (idx >= 0) members.splice(idx, 1)
+              break
+            }
+          }
+          // Scan for standalone numeric parts as interval
+          if (!interval) {
+            for (let i = members.length - 1; i >= 0; i--) {
+              const m = members[i]!
+              if (/^\d+(,\d+)*$/.test(m)) {
+                const timeParts = m.split(',').map(s => Number.parseInt(s.trim()))
+                interval = timeParts[0] || undefined
+                timeout = timeParts[1] || undefined
+                tolerance = timeParts[2] || undefined
+                members.splice(i, 1)
+                break
+              }
+            }
+          }
+        }
+
+        const tpl: ProxyGroupTemplate = { name: name!, type, members, testUrl, interval, tolerance }
+        if (timeout != null) tpl.timeout = timeout
+        if (providers.length > 0) tpl.providers = providers
+        config.proxyGroups.push(tpl)
       }
     }
 
     if (line.startsWith('enable_rule_generator=')) {
-      config.enableRuleGenerator = line.split('=')[1].trim() === 'true'
+      config.enableRuleGenerator = line.slice('enable_rule_generator='.length).trim() === 'true'
     }
     if (line.startsWith('overwrite_original_rules=')) {
-      config.overwriteOriginalRules = line.split('=')[1].trim() === 'true'
+      config.overwriteOriginalRules = line.slice('overwrite_original_rules='.length).trim() === 'true'
     }
   }
 
@@ -104,17 +156,24 @@ export function parseExternalConfig(content: string): ExternalConfig {
  * Resolve proxy group members — replace `[]GroupName` with group references,
  * `[]DIRECT`/`[]REJECT` with built-in policies, and regex patterns with matching proxy names.
  */
-export function resolveProxyGroups(
-  templates: ProxyGroupTemplate[],
-  proxies: Proxy[],
-): Array<{
+export interface ResolvedProxyGroup {
   name: string
   type: string
   proxies: string[]
   url?: string
   interval?: number
   tolerance?: number
-}> {
+  timeout?: number
+  lazy?: boolean
+  disableUdp?: boolean
+  strategy?: string
+  providers?: string[]
+}
+
+export function resolveProxyGroups(
+  templates: ProxyGroupTemplate[],
+  proxies: Proxy[],
+): ResolvedProxyGroup[] {
   const proxyNames = proxies.map(p => p.name)
 
   return templates.map((tpl) => {
@@ -142,7 +201,7 @@ export function resolveProxyGroups(
       }
     }
 
-    return {
+    const group: ResolvedProxyGroup = {
       name: tpl.name,
       type: tpl.type,
       proxies: resolved,
@@ -150,12 +209,23 @@ export function resolveProxyGroups(
       interval: tpl.interval,
       tolerance: tpl.tolerance,
     }
+    if (tpl.timeout != null) group.timeout = tpl.timeout
+    if (tpl.lazy != null) group.lazy = tpl.lazy
+    if (tpl.disableUdp != null) group.disableUdp = tpl.disableUdp
+    if (tpl.strategy) group.strategy = tpl.strategy
+    if (tpl.providers && tpl.providers.length > 0) group.providers = tpl.providers
+    return group
   })
 }
+
+/** Simple in-memory cache for fetched rulesets */
+const rulesetCache = new Map<string, { rules: string[]; expiresAt: number }>()
+const RULESET_CACHE_TTL = 6 * 60 * 60 * 1000 // 6 hours (same as C++ default: 21600s)
 
 /**
  * Fetch a ruleset from URL and parse it into Clash rule lines.
  * Handles both inline rules ([]GEOIP,CN) and remote rule list files.
+ * Results are cached in memory for RULESET_CACHE_TTL.
  */
 export async function fetchRuleset(entry: RulesetEntry): Promise<string[]> {
   const { group, url } = entry
@@ -167,6 +237,13 @@ export async function fetchRuleset(entry: RulesetEntry): Promise<string[]> {
       return [`MATCH,${group}`]
     }
     return [`${ruleBody},${group}`]
+  }
+
+  // Check cache (keyed by url+group)
+  const cacheKey = `${group}|${url}`
+  const cached = rulesetCache.get(cacheKey)
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.rules
   }
 
   // Fetch content: local file or remote URL
@@ -234,6 +311,8 @@ export async function fetchRuleset(entry: RulesetEntry): Promise<string[]> {
         }
       }
     }
+    // Store in cache
+    rulesetCache.set(cacheKey, { rules, expiresAt: Date.now() + RULESET_CACHE_TTL })
     return rules
   }
   catch (err: any) {

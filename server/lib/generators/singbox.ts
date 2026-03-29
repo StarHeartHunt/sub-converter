@@ -143,6 +143,29 @@ function mapProxyToSingBox(proxy: Proxy): SingBoxOutbound | null {
       return outbound
     }
 
+    case 'hysteria': {
+      const outbound: SingBoxOutbound = {
+        type: 'hysteria',
+        tag: proxy.name,
+        server: proxy.server,
+        server_port: proxy.port,
+      }
+      if (proxy.upSpeed || proxy.up) outbound.up_mbps = proxy.upSpeed || Number.parseInt(proxy.up || '0') || 0
+      if (proxy.downSpeed || proxy.down) outbound.down_mbps = proxy.downSpeed || Number.parseInt(proxy.down || '0') || 0
+      if (proxy.obfsPassword) outbound.obfs = proxy.obfsPassword
+      if (proxy.authStr) {
+        outbound.auth_str = proxy.authStr
+      }
+      if (proxy.recvWindowConn) outbound.recv_window_conn = proxy.recvWindowConn
+      if (proxy.recvWindow) outbound.recv_window = proxy.recvWindow
+      const tls: Record<string, unknown> = { enabled: true }
+      if (proxy.sni) tls.server_name = proxy.sni
+      if (proxy.skipCertVerify) tls.insecure = true
+      if (proxy.alpn) tls.alpn = proxy.alpn
+      outbound.tls = tls
+      return outbound
+    }
+
     case 'hysteria2': {
       const outbound: SingBoxOutbound = {
         type: 'hysteria2',
@@ -169,7 +192,75 @@ function mapProxyToSingBox(proxy: Proxy): SingBoxOutbound | null {
       return outbound
     }
 
-    // ssr, wireguard, http, socks5 — skip for now
+    case 'ssr': {
+      const outbound: SingBoxOutbound = {
+        type: 'shadowsocksr',
+        tag: proxy.name,
+        server: proxy.server,
+        server_port: proxy.port,
+        method: proxy.method || 'aes-256-cfb',
+        password: proxy.password || '',
+        protocol: proxy.protocol || 'origin',
+        protocol_param: proxy.protocolParam || '',
+        obfs: proxy.obfs || 'plain',
+        obfs_param: proxy.obfsParam || '',
+      }
+      return outbound
+    }
+
+    case 'wireguard': {
+      const addresses: string[] = []
+      if (proxy.ip) addresses.push(proxy.ip)
+      if (proxy.ipv6) addresses.push(proxy.ipv6)
+      const peer: Record<string, unknown> = {
+        server: proxy.server,
+        server_port: proxy.port,
+        public_key: proxy.peerPublicKey || '',
+      }
+      if (proxy.preSharedKey) peer.pre_shared_key = proxy.preSharedKey
+      peer.allowed_ips = ['0.0.0.0/0', '::/0']
+      if (proxy.reserved) peer.reserved = proxy.reserved
+
+      const outbound: SingBoxOutbound = {
+        type: 'wireguard',
+        tag: proxy.name,
+        local_address: addresses,
+        private_key: proxy.privateKey || '',
+        peers: [peer],
+        mtu: proxy.mtu || 1420,
+      }
+      return outbound
+    }
+
+    case 'http': {
+      const outbound: SingBoxOutbound = {
+        type: 'http',
+        tag: proxy.name,
+        server: proxy.server,
+        server_port: proxy.port,
+        username: proxy.username || '',
+        password: proxy.password || '',
+      }
+      if (proxy.tls) {
+        const tls = buildTls(proxy)
+        if (tls) outbound.tls = tls
+      }
+      return outbound
+    }
+
+    case 'socks5': {
+      const outbound: SingBoxOutbound = {
+        type: 'socks',
+        tag: proxy.name,
+        server: proxy.server,
+        server_port: proxy.port,
+        version: '5',
+        username: proxy.username || '',
+        password: proxy.password || '',
+      }
+      return outbound
+    }
+
     default:
       return null
   }
@@ -240,15 +331,19 @@ export function generateSingBox(proxies: Proxy[], options?: ExternalGenerateOpti
   let selectorOutbounds: SingBoxOutbound[]
   if (hasExternal) {
     selectorOutbounds = options!.externalGroups!.map((g) => {
-      if (g.type === 'url-test' || g.type === 'fallback') {
-        return {
+      // Smart and url-test/fallback all map to urltest in sing-box
+      if (g.type === 'url-test' || g.type === 'fallback' || g.type === 'smart') {
+        const ob: SingBoxOutbound = {
           type: 'urltest',
           tag: g.name,
           outbounds: g.proxies.length > 0 ? g.proxies : [...tags],
           url: g.url || 'http://www.gstatic.com/generate_204',
           interval: `${g.interval || 300}s`,
         }
+        if (g.tolerance) ob.tolerance = `${g.tolerance}ms`
+        return ob
       }
+      // Relay maps to a chain of outbounds — approximate with selector
       return {
         type: 'selector',
         tag: g.name,
