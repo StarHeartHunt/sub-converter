@@ -2,6 +2,7 @@ import { parseSubscription } from '../lib/parsers'
 import { generateConfig } from '../lib/generators'
 import type { ExternalGenerateOptions } from '../lib/generators'
 import { parseExternalConfig, resolveProxyGroups, fetchAllRulesets } from '../lib/config'
+import { DEFAULT_PROXY_GROUPS, DEFAULT_RULESETS } from '../lib/defaults'
 import { applyEmoji } from '../lib/emoji'
 import type { Proxy, TargetType, SubConfig } from '../lib/types'
 
@@ -182,25 +183,39 @@ export default defineEventHandler(async (event) => {
     if (count > 1) p.name = `${p.name} ${count}`
   }
 
-  // Fetch and apply external config (for all targets that support groups/rules)
+  // Fetch and apply external config or built-in defaults (for targets that support groups/rules)
   let externalOptions: ExternalGenerateOptions | undefined
-  if (config.config && TARGETS_WITH_CONFIG.has(target)) {
+  if (TARGETS_WITH_CONFIG.has(target)) {
     try {
-      const configUrl = resolveConfigUrl(config.config, event)
-      console.log(`[sub] Fetching external config: ${configUrl}`)
-      const configContent = await $fetch<string>(configUrl, {
-        responseType: 'text',
-        timeout: 10000,
-      })
-      const extConfig = parseExternalConfig(configContent)
-      console.log(`[sub] External config: ${extConfig.proxyGroups.length} groups, ${extConfig.rulesets.length} rulesets`)
+      let groupTemplates
+      let rulesetEntries
+
+      if (config.config) {
+        // Use external config from parameter
+        const configUrl = resolveConfigUrl(config.config, event)
+        console.log(`[sub] Fetching external config: ${configUrl}`)
+        const configContent = await $fetch<string>(configUrl, {
+          responseType: 'text',
+          timeout: 10000,
+        })
+        const extConfig = parseExternalConfig(configContent)
+        console.log(`[sub] External config: ${extConfig.proxyGroups.length} groups, ${extConfig.rulesets.length} rulesets`)
+        groupTemplates = extConfig.proxyGroups
+        rulesetEntries = extConfig.rulesets
+      }
+      else {
+        // Use built-in default groups and rulesets (equivalent to subconverter's snippets)
+        console.log(`[sub] Using built-in default groups and rulesets`)
+        groupTemplates = DEFAULT_PROXY_GROUPS
+        rulesetEntries = DEFAULT_RULESETS
+      }
 
       // Resolve proxy groups
-      const resolvedGroups = resolveProxyGroups(extConfig.proxyGroups, filtered)
+      const resolvedGroups = resolveProxyGroups(groupTemplates, filtered)
 
       // Fetch rulesets
-      const rules = await fetchAllRulesets(extConfig.rulesets)
-      console.log(`[sub] Fetched ${rules.length} rules from ${extConfig.rulesets.length} rulesets`)
+      const rules = await fetchAllRulesets(rulesetEntries)
+      console.log(`[sub] Fetched ${rules.length} rules from ${rulesetEntries.length} rulesets`)
 
       externalOptions = {
         externalGroups: resolvedGroups,
@@ -208,8 +223,8 @@ export default defineEventHandler(async (event) => {
       }
     }
     catch (err: any) {
-      console.warn(`[sub] Failed to process external config: ${err?.message}`)
-      // Fall through to default groups/rules
+      console.warn(`[sub] Failed to process config: ${err?.message}`)
+      // Fall through to generator's built-in fallback
     }
   }
 

@@ -1,4 +1,9 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { Proxy } from './types'
+
+/** Base path for local rule files bundled with subconverter */
+const RULES_BASE_PATH = resolve(process.cwd(), 'thirdparty/subconverter/base')
 
 export interface RulesetEntry {
   group: string
@@ -164,13 +169,21 @@ export async function fetchRuleset(entry: RulesetEntry): Promise<string[]> {
     return [`${ruleBody},${group}`]
   }
 
-  // Remote rule list
+  // Fetch content: local file or remote URL
   try {
-    const content = await $fetch<string>(url, {
-      responseType: 'text',
-      headers: { 'User-Agent': 'ClashForAndroid/2.5.12' },
-      timeout: 10000,
-    })
+    let content: string
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      content = await $fetch<string>(url, {
+        responseType: 'text',
+        headers: { 'User-Agent': 'ClashForAndroid/2.5.12' },
+        timeout: 10000,
+      })
+    }
+    else {
+      // Local file path relative to subconverter base
+      const filePath = resolve(RULES_BASE_PATH, url)
+      content = readFileSync(filePath, 'utf-8')
+    }
 
     const rules: string[] = []
     for (const rawLine of content.split(/\r?\n/)) {
