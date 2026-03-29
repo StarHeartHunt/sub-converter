@@ -23,6 +23,7 @@
     "@iconify-json/mdi": "^1.2.3",
     "@iconify-json/simple-icons": "^1.2.75",
     "@types/js-yaml": "^4.0.9",
+    "@types/node": "^25.5.0",
     "js-yaml": "^4.1.1"
   }
 }
