@@ -168,7 +168,10 @@ export function generateClash(proxies: Proxy[], options?: ExternalGenerateOption
       if (g.tolerance) group['tolerance'] = g.tolerance
       return group
     })
-    rules = options?.externalRules ?? ['GEOIP,CN,DIRECT', 'MATCH,PROXY']
+    // Filter out rule types not supported by Clash
+    const unsupported = /^(USER-AGENT|URL-REGEX),/i
+    rules = (options?.externalRules ?? ['GEOIP,CN,DIRECT', 'MATCH,PROXY'])
+      .filter(r => !unsupported.test(r))
   }
   else {
     proxyGroups = [

@@ -187,14 +187,19 @@ export async function fetchRuleset(entry: RulesetEntry): Promise<string[]> {
 
     const rules: string[] = []
     for (const rawLine of content.split(/\r?\n/)) {
-      const line = rawLine.trim()
+      let line = rawLine.trim()
       if (!line || line.startsWith('#') || line.startsWith(';')) continue
+
+      // Strip inline comments: "DOMAIN-SUFFIX,example.com // comment" → "DOMAIN-SUFFIX,example.com"
+      const commentIdx = line.indexOf(' //')
+      if (commentIdx > 0) {
+        line = line.slice(0, commentIdx).trim()
+      }
 
       // Rule list format: each line is like DOMAIN-SUFFIX,example.com
       // We need to append the group name
       if (/^(DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|IP-CIDR|IP-CIDR6|GEOIP|GEOSITE|SRC-IP-CIDR|SRC-PORT|DST-PORT|PROCESS-NAME|MATCH|RULE-SET|USER-AGENT|URL-REGEX)/i.test(line)) {
         const parts = line.split(',')
-        const ruleType = parts[0].toUpperCase()
 
         // Rules with no-resolve flag: IP-CIDR,x.x.x.x/y,no-resolve
         // This is NOT a policy — "no-resolve" is a flag
@@ -244,24 +249,3 @@ export async function fetchAllRulesets(entries: RulesetEntry[]): Promise<string[
   const results = await Promise.all(entries.map(fetchRuleset))
   return results.flat()
 }
-
-/** Default config presets — using bundled local configs */
-export const CONFIG_PRESETS = [
-  { label: 'ACL4SSR 默认版', value: 'ACL4SSR_Online' },
-  { label: 'ACL4SSR 全分组', value: 'ACL4SSR_Online_Full' },
-  { label: 'ACL4SSR 精简版', value: 'ACL4SSR_Online_Mini' },
-  { label: 'ACL4SSR 无自动测速', value: 'ACL4SSR_Online_NoAuto' },
-  { label: 'ACL4SSR 全分组无测速', value: 'ACL4SSR_Online_Full_NoAuto' },
-  { label: 'ACL4SSR 精简无测速', value: 'ACL4SSR_Online_Mini_NoAuto' },
-  { label: 'ACL4SSR 去广告Plus', value: 'ACL4SSR_Online_AdblockPlus' },
-  { label: 'ACL4SSR 全分组去广告Plus', value: 'ACL4SSR_Online_Full_AdblockPlus' },
-  { label: 'ACL4SSR 全分组多国家', value: 'ACL4SSR_Online_Full_MultiMode' },
-  { label: 'ACL4SSR 精简多模式', value: 'ACL4SSR_Online_Mini_MultiMode' },
-  { label: 'ACL4SSR 多国家', value: 'ACL4SSR_Online_MultiCountry' },
-  { label: 'ACL4SSR 精简多国家', value: 'ACL4SSR_Online_Mini_MultiCountry' },
-  { label: 'ACL4SSR 无拦截', value: 'ACL4SSR_Online_NoReject' },
-  { label: 'ACL4SSR 全分组奈飞', value: 'ACL4SSR_Online_Full_Netflix' },
-  { label: 'ACL4SSR 全分组谷歌', value: 'ACL4SSR_Online_Full_Google' },
-  { label: 'ACL4SSR 精简Fallback', value: 'ACL4SSR_Online_Mini_Fallback' },
-  { label: 'ACL4SSR 精简去广告Plus', value: 'ACL4SSR_Online_Mini_AdblockPlus' },
-]
